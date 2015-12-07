@@ -7,8 +7,14 @@ abstract AbstractCudaArray{T,N}
 typealias AbstractCudaVector{T} AbstractCudaArray{T,1}
 typealias AbstractCudaMatrix{T} AbstractCudaArray{T,2}
 
+dbg = Dict{Any,Any}()
+# inc!(s::Symbol)=(global dbg; b=backtrace(); dbg[b]=1+get(dbg,b,0))
+# inc!(s::Symbol)=(global dbg; dbg[s]=1+get(dbg,s,0))
+inc!(s::Symbol)=nothing
+showdbg()=(for (k,v) in CUDArt.dbg; print("\ncnt=$v"); Base.show_backtrace(STDOUT,k); end)
+
 # copy method for AbstractCudaArray
-copy(a::AbstractCudaArray; stream=null_stream) = copy!(similar(a),a;stream=stream)
+copy(a::AbstractCudaArray; stream=null_stream) = (inc!(:copy);copy!(similar(a),a;stream=stream))
 
 # Set the following to true to store a backtrace
 # at allocation time, to identify where each array comes from
@@ -20,6 +26,10 @@ if !debugMemory
         ptr::CudaPtr{T}
         dims::NTuple{N,Int}
         dev::Int
+        function CudaArray(ptr::CudaPtr{T}, dims::NTuple{N,Int}, dev::Integer)
+            inc!(:CudaArray)
+            new(ptr, dims, dev)
+        end
     end
 else
     type CudaArray{T,N} <: AbstractCudaArray{T,N}
@@ -121,6 +131,7 @@ function reinterpret{R,S}(::Type{R}, g::CudaArray{S})
     if sizeof(R) != sizeof(S)
         error("result shape not specified")
     end
+    inc!(:reinterpret1)
     CudaArray{R,ndims(g)}(g.ptr, g.dims, g.dev)
 end
 function reinterpret{R,S,N}(::Type{R}, g::CudaArray{S}, dims::NTuple{N,Int})
@@ -128,6 +139,7 @@ function reinterpret{R,S,N}(::Type{R}, g::CudaArray{S}, dims::NTuple{N,Int})
     if prod(dims) != lenR
         throw(DimensionMismatch("New dimensions $dims must be consistent with array of length $lenR"))
     end
+    inc!(:reinterpret)
     CudaArray{R,N}(g.ptr, dims, g.dev)
 end
 
@@ -150,6 +162,7 @@ function copy!{T}(dst::ContiguousArray{T}, src::ContiguousArray{T}; stream=null_
     end
     nbytes = length(src) * sizeof(T)
     rt.cudaMemcpyAsync(dst, src, nbytes, cudamemcpykind(dst, src), stream)
+    inc!(:copy!)
     return dst
 end
 
@@ -159,6 +172,7 @@ function fill!{T}(X::CudaArray{T}, val; stream=null_stream)
     nsm = attribute(device(), rt.cudaDevAttrMultiProcessorCount)
     mul = min(32, ceil(Int, length(X)/(256*nsm)))
     launch(func, mul*nsm, 256, (X, length(X), valT); stream=stream)
+    inc!(:fill!)
     X
 end
 
